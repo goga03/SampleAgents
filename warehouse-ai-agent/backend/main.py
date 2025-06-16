@@ -2,6 +2,7 @@ import openai
 import os
 import random
 import time
+import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -54,10 +55,10 @@ async def assign_warehouse(order: OrderInput):
     assistant = openai.beta.assistants.create(
         model="gpt-4o",
         instructions=(
-            "You are a fulfillment agent. "
-            "For each order, call the get_warehouse_capacity tool for each warehouse you want to consider. "
-            "Decide which warehouse should fulfill the order, factoring in region, priority, and available capacity. "
-            "Explain your reasoning clearly to the customer."
+            "You are a warehouse fulfillment agent. "
+            "For EVERY incoming order, you MUST use the get_warehouse_capacity tool for EACH warehouse you want to consider. "
+            "Never answer based on your own knowledge; always call the tool first and only then decide. "
+            "If you do not call the tool, you are making a mistake."
         ),
         tools=warehouse_tool_schema
     )
@@ -70,7 +71,7 @@ async def assign_warehouse(order: OrderInput):
         f"Items: {order.items}\n"
         f"Region: {order.region}\n"
         f"Priority: {order.priority}\n"
-        "Please assign the best warehouse for this order."
+        "Please check the real-time capacity of the warehouses and assign the best one."
     )
     openai.beta.threads.messages.create(
         thread_id=thread.id,
@@ -85,6 +86,7 @@ async def assign_warehouse(order: OrderInput):
 
     while True:
         run_status = openai.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+        print("run status is " + str(run_status.status))
         if run_status.status == "requires_action":
             tool_outputs = []
             for tool_call in run_status.required_action.submit_tool_outputs.tool_calls:
@@ -92,7 +94,7 @@ async def assign_warehouse(order: OrderInput):
                 output = get_warehouse_capacity(args["warehouse_id"])
                 tool_outputs.append({
                     "tool_call_id": tool_call.id,
-                    "output": output
+                    "output": json.dumps(output)
                 })
             run = openai.beta.threads.runs.submit_tool_outputs(
                 thread_id=thread.id,
